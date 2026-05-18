@@ -2,28 +2,38 @@ $AdminUrl = "https://YOURTENANT-admin.sharepoint.com"
 $ClientId = "YOUR-CLIENT-ID"
 $AdminUser = "365AdminUser"
 
-# Connect once to SharePoint Admin Center
+# ==============================
+# CONNECT TO SHAREPOINT ADMIN
+# ==============================
+
 $AdminConnection = Connect-PnPOnline `
     -Url $AdminUrl `
     -Interactive `
     -ClientId $ClientId `
     -ReturnConnection
 
-# Get OneDrive sites
+# ==============================
+# GET ONEDRIVE SITES
+# ==============================
+
 $OneDriveSites = Get-PnPTenantSite `
     -IncludeOneDriveSites `
     -Connection $AdminConnection `
     -Filter "Url -like '-my.sharepoint.com/personal/'"
 
+# ==============================
+# PASS 1 - ADD SITE ADMINS
+# ==============================
+
 Write-Host ""
 Write-Host "==============================" -ForegroundColor Yellow
-Write-Host "PASS 1 - Adding Site Admins" -ForegroundColor Yellow
+Write-Host "PASS 1 - ADDING SITE ADMINS" -ForegroundColor Yellow
 Write-Host "==============================" -ForegroundColor Yellow
 Write-Host ""
 
 foreach ($Site in $OneDriveSites)
 {
-    Write-Host "Adding admin to $($Site.Url)" -ForegroundColor Cyan
+    Write-Host "Checking admin access for $($Site.Url)" -ForegroundColor Cyan
 
     try
     {
@@ -34,14 +44,36 @@ foreach ($Site in $OneDriveSites)
             continue
         }
 
-        # Add Site Collection Admin
-        Set-PnPTenantSite `
-            -Identity $Site.Url `
-            -Owners $AdminUser `
-            -Connection $AdminConnection `
-            -ErrorAction Stop
+        # Connect to OneDrive
+        Connect-PnPOnline `
+            -Url $Site.Url `
+            -Interactive `
+            -ClientId $ClientId
 
-        Write-Host "Admin added successfully" -ForegroundColor Green
+        # Get current site collection admins
+        $Admins = Get-PnPSiteCollectionAdmin -ErrorAction Stop
+
+        # Check if admin already exists
+        $AdminExists = $Admins | Where-Object {
+            $_.LoginName -match $AdminUser
+        }
+
+        if ($AdminExists)
+        {
+            Write-Host "$AdminUser already has access" -ForegroundColor Green
+        }
+        else
+        {
+            Write-Host "Adding admin access..." -ForegroundColor Yellow
+
+            Set-PnPTenantSite `
+                -Identity $Site.Url `
+                -Owners $AdminUser `
+                -Connection $AdminConnection `
+                -ErrorAction Stop
+
+            Write-Host "Admin added successfully" -ForegroundColor Green
+        }
     }
     catch
     {
@@ -50,13 +82,16 @@ foreach ($Site in $OneDriveSites)
     }
 }
 
+# ==============================
+# WAIT FOR PROPAGATION
+# ==============================
+
 Write-Host ""
 Write-Host "==============================" -ForegroundColor Yellow
-Write-Host "Waiting for permission propagation..." -ForegroundColor Yellow
+Write-Host "WAITING FOR PERMISSION PROPAGATION" -ForegroundColor Yellow
 Write-Host "==============================" -ForegroundColor Yellow
 Write-Host ""
 
-# Wait 5 minutes with countdown
 $WaitSeconds = 300
 
 for ($i = $WaitSeconds; $i -ge 1; $i--)
@@ -76,9 +111,13 @@ Write-Progress `
     -Activity "Waiting for SharePoint permission propagation" `
     -Completed
 
+# ==============================
+# PASS 2 - UPDATE REGIONAL SETTINGS
+# ==============================
+
 Write-Host ""
 Write-Host "==============================" -ForegroundColor Yellow
-Write-Host "PASS 2 - Updating Regional Settings" -ForegroundColor Yellow
+Write-Host "PASS 2 - UPDATING REGIONAL SETTINGS" -ForegroundColor Yellow
 Write-Host "==============================" -ForegroundColor Yellow
 Write-Host ""
 
@@ -95,22 +134,21 @@ foreach ($Site in $OneDriveSites)
             continue
         }
 
-        # Reuse existing admin authentication
-        $ODConnection = Connect-PnPOnline `
+        # Connect to OneDrive
+        Connect-PnPOnline `
             -Url $Site.Url `
-            -ClientId $ClientId `
-            -Connection $AdminConnection `
-            -ReturnConnection
+            -Interactive `
+            -ClientId $ClientId
 
         # Get web
-        $Web = Get-PnPWeb -Connection $ODConnection
+        $Web = Get-PnPWeb
 
-        # Set Locale to English UK
+        # Set locale to English UK
         $Web.RegionalSettings.LocaleId = 2057
 
         $Web.Update()
 
-        Invoke-PnPQuery -Connection $ODConnection
+        Invoke-PnPQuery
 
         Write-Host "Regional settings updated successfully" -ForegroundColor Green
     }
@@ -121,7 +159,11 @@ foreach ($Site in $OneDriveSites)
     }
 }
 
+# ==============================
+# COMPLETE
+# ==============================
+
 Write-Host ""
 Write-Host "==============================" -ForegroundColor Green
-Write-Host "Processing Complete" -ForegroundColor Green
+Write-Host "PROCESSING COMPLETE" -ForegroundColor Green
 Write-Host "==============================" -ForegroundColor Green
